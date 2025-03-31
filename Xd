@@ -1,0 +1,138 @@
+#include <xc.h>
+#include <stdio.h>
+#include <stdbool.h>
+
+// Konfiguracja fusów
+#pragma config FWDTEN = OFF      // Watchdog Timer wyłączony
+#pragma config JTAGEN = OFF      // JTAG wyłączony
+#pragma config GCP = OFF         // Code Protect wyłączony
+#pragma config GWRP = OFF        // Write Protect wyłączony
+
+// Definicje przycisków
+#define NEXT_BTN PORTDbits.RD6
+#define PREV_BTN PORTDbits.RD13
+
+// Definicje LED
+#define LED_PORT LATB
+#define LED_MASK 0xFF
+
+// Zmienne globalne
+volatile uint8_t program_number = 1;
+volatile uint8_t counter = 0;
+volatile uint8_t gray_code = 0;
+volatile uint8_t bcd_counter = 0;
+volatile uint8_t snake_state = 1;
+volatile uint8_t queue_state = 1;
+volatile uint8_t lfsr = 0b1110011;
+
+void delay_ms(unsigned int ms) {
+    while(ms--) {
+        __delay32(16000); // Opóźnienie ~1ms przy Fosc = 16MHz
+    }
+}
+
+// Funkcja obsługi przycisków
+void handle_buttons() {
+    if (!NEXT_BTN) { // Przycisk RD6
+        program_number++;
+        if (program_number > 9) program_number = 1;
+        delay_ms(200);
+    }
+    
+    if (!PREV_BTN) { // Przycisk RD13
+        program_number--;
+        if (program_number < 1) program_number = 9;
+        delay_ms(200);
+    }
+}
+
+// 1. Licznik binarny w górę
+void counter_up() {
+    counter++;
+    LED_PORT = counter & LED_MASK;
+}
+
+// 2. Licznik binarny w dół
+void counter_down() {
+    counter--;
+    LED_PORT = counter & LED_MASK;
+}
+
+// 3. Licznik w kodzie Graya w górę
+void gray_up() {
+    counter++;
+    gray_code = counter ^ (counter >> 1);
+    LED_PORT = gray_code;
+}
+
+// 4. Licznik w kodzie Graya w dół
+void gray_down() {
+    counter--;
+    gray_code = counter ^ (counter >> 1);
+    LED_PORT = gray_code;
+}
+
+// 5. Licznik BCD w górę
+void bcd_up() {
+    bcd_counter++;
+    if (bcd_counter > 99) bcd_counter = 0;
+    LED_PORT = ((bcd_counter / 10) << 4) | (bcd_counter % 10);
+}
+
+// 6. Licznik BCD w dół
+void bcd_down() {
+    bcd_counter--;
+    if (bcd_counter > 99) bcd_counter = 99;
+    LED_PORT = ((bcd_counter / 10) << 4) | (bcd_counter % 10);
+}
+
+// 7. Wężyk lewo-prawo
+void snake_move() {
+    LED_PORT = snake_state;
+    snake_state = (snake_state == 0b10000000) ? 0b00000001 : (snake_state << 1);
+}
+
+// 8. Kolejka
+void queue_move() {
+    LED_PORT = queue_state;
+    queue_state = (queue_state == 0b11111111) ? 0b00000001 : (queue_state << 1) | 1;
+}
+
+// 9. Generator liczb pseudolosowych
+void random_generator() {
+    uint8_t bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 5) ^ (lfsr >> 6)) & 1;
+    lfsr = (lfsr >> 1) | (bit << 6);
+    LED_PORT = lfsr & 0x3F;
+}
+
+void execute_program() {
+    switch(program_number) {
+        case 1: counter_up(); break;
+        case 2: counter_down(); break;
+        case 3: gray_up(); break;
+        case 4: gray_down(); break;
+        case 5: bcd_up(); break;
+        case 6: bcd_down(); break;
+        case 7: snake_move(); break;
+        case 8: queue_move(); break;
+        case 9: random_generator(); break;
+    }
+}
+
+void init() {
+    TRISB = 0x00; // Port B jako wyjście (LEDy)
+    TRISD = 0xFFFF; // Port D jako wejście (przyciski)
+    LED_PORT = 0x00;
+}
+
+int main() {
+    init();
+    
+    while (1) {
+        handle_buttons();
+        execute_program();
+        delay_ms(200);
+    }
+    
+    return 0;
+}
